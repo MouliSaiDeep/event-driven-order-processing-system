@@ -1,5 +1,5 @@
 const { Kafka } = require("kafkajs");
-const pool = require("./database");
+const { pool } = require("./database");
 const { publishEvent } = require("./producer");
 const logger = require("./logger");
 
@@ -17,6 +17,21 @@ const processOrder = async (orderEvent) => {
   try {
     await connection.beginTransaction();
 
+    // --- IDEMPOTENCY CHECK START ---
+    const [existingEvents] = await connection.execute(
+      "SELECT event_id FROM processed_events WHERE event_id = ? FOR UPDATE",
+      [idempotency_key],
+    );
+
+    if (existingEvents.length > 0) {
+      logger.info(
+        `Skipping duplicate event ${idempotency_key} for order ${order_id}`,
+      );
+      await connection.rollback();
+      return;
+    }
+    // --- IDEMPOTENCY CHECK END ---
+
     // Check availability for all items
     for (const item of items) {
       const [rows] = await connection.execute(
@@ -31,11 +46,17 @@ const processOrder = async (orderEvent) => {
 
     // Decrement stock
     for (const item of items) {
-      const [rows] = connection.execute(
+      await connection.execute(
         "UPDATE products SET stock_level = stock_level - ? WHERE product_id = ?",
         [item.quantity, item.product_id],
       );
     }
+
+    // Mark event as processed
+    await connection.execute(
+      "INSERT INTO processed_events (event_id) VALUES (?)",
+      [idempotency_key],
+    );
 
     await connection.commit();
     logger.info(`Stock reserved for order ${order_id}`);
@@ -54,7 +75,7 @@ const processOrder = async (orderEvent) => {
       `Failed to reserve stock for order ${order_id}: ${error.message}`,
     );
 
-    // Publish a Failure Event
+    // Publish Failure Event
     await publishEvent("inventory-events", {
       event_type: "InventoryFailed",
       order_id,
@@ -76,7 +97,7 @@ const connectConsumer = async () => {
     await consumer.run({
       eachMessage: async ({ topic, partition, message }) => {
         const event = JSON.parse(message.value.toString());
-        logger.info("Received order-created event", {
+        logger.info(`Received order-created event`, {
           order_id: event.order_id,
         });
         await processOrder(event);
@@ -84,7 +105,7 @@ const connectConsumer = async () => {
     });
     logger.info("Kafka Consumer connected and listening");
   } catch (error) {
-    logger.error("Failed to connect Kafka Consumer", error);
+    logger.error("Failed to connect Kafka Consumer:", error);
     process.exit(1);
   }
 };
