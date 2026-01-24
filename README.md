@@ -135,7 +135,7 @@ We have a Python test suite that verifies the entire flow (Happy Path & Failure 
 You can manually trigger an order:
 
 ```bash
-curl -X POST http://localhost:3000/api/orders \
+curl -X POST http://localhost:3005/api/orders \
   -H "Content-Type: application/json" \
   -d '{"user_id": "test-user", "items": [{"product_id": "prod-001", "quantity": 1}]}'
 ```

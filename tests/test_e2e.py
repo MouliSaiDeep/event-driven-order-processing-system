@@ -3,8 +3,8 @@ import requests
 import time
 import uuid
 
-ORDER_SERVICE_URL = "http://localhost:3000"
-ORDER_STATUS_SERVICE_URL = "http://localhost:3001"
+ORDER_SERVICE_URL = "http://localhost:3005"
+ORDER_STATUS_SERVICE_URL = "http://localhost:3006"
 
 @pytest.fixture
 def unique_order_payload():

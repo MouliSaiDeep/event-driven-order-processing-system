@@ -17,7 +17,7 @@
     "express": "^5.2.1",
     "joi": "^18.0.2",
     "kafkajs": "^2.2.4",
-    "uuid": "^13.0.0",
+    "uuid": "^9.0.1",
     "winston": "^3.19.0"
   },
   "devDependencies": {
