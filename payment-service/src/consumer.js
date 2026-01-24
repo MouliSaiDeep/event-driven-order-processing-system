@@ -17,7 +17,15 @@ const processPayment = async (orderEvent) => {
   // Simulate processing time
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  const isSuccess = Math.random() < 0.7;
+  // Deterministic mock for testing
+  let isSuccess;
+  if (user_id && user_id.startsWith("test-user")) {
+    isSuccess = true;
+  } else if (user_id === "fail-user") {
+    isSuccess = false;
+  } else {
+    isSuccess = Math.random() < 0.7;
+  }
 
   if (isSuccess) {
     logger.info(`Payment successful for order ${order_id}`);

@@ -9,9 +9,14 @@ CREATE TABLE IF NOT EXISTS products (
     price DECIMAL(10, 2) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS processed_events (
+    event_id VARCHAR(255) PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 
 -- Seed initial data
-INSERT INTO products (product_id, name, description, stocke_level, price)
+INSERT INTO products (product_id, name, description, stock_level, price)
 ('prod-001', 'Laptop Pro', 'High-performance laptop', 50, 1200.00),
 ('prod-002', 'Mechanical Keyboard', 'Gaming keyboard', 100, 150.00),
 ('prod-003', 'Wireless Mouse', 'Ergonomic wireless mouse', 75, 50.00),
