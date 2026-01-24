@@ -47,6 +47,7 @@ services:
     environment:
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=${MYSQL_INVENTORY_DB}
+      - MYSQL_ROOT_HOST=%
     volumes:
       - ./mysql/inventory:/docker-entrypoint-initdb.d
     healthcheck:
@@ -64,6 +65,7 @@ services:
     environment:
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=${MYSQL_ORDERSTATUS_DB}
+      - MYSQL_ROOT_HOST=%
     volumes:
       - ./mysql/orderstatus:/docker-entrypoint-initdb.d
     healthcheck:
