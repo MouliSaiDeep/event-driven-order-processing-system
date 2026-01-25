@@ -80,10 +80,10 @@ services:
     build: ./order-service
     ports:
       - "3005:3000"
+    env_file:
+      - ./order-service/.env
     environment:
-      - PORT=3000
       - KAFKA_BROKERS=kafka:29092
-      - CLIENT_ID=order-service
     depends_on:
       kafka:
         condition: service_healthy
@@ -92,12 +92,11 @@ services:
 
   inventory-service:
     build: ./inventory-service
+    env_file:
+      - ./inventory-service/.env
     environment:
       - KAFKA_BROKERS=kafka:29092
       - MYSQL_INVENTORY_HOST=mysql-inventory
-      - MYSQL_INVENTORY_USER=root
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_INVENTORY_DATABASE=${MYSQL_INVENTORY_DB}
       - MYSQL_INVENTORY_PORT=3306
     depends_on:
       kafka:
@@ -109,6 +108,8 @@ services:
 
   payment-service:
     build: ./payment-service
+    env_file:
+      - ./payment-service/.env
     environment:
       - KAFKA_BROKERS=kafka:29092
     depends_on:
@@ -121,13 +122,11 @@ services:
     build: ./order-status-service
     ports:
       - "3006:3001"
+    env_file:
+      - ./order-status-service/.env
     environment:
-      - PORT=3001
       - KAFKA_BROKERS=kafka:29092
       - MYSQL_ORDERSTATUS_HOST=mysql-orderstatus
-      - MYSQL_ORDERSTATUS_USER=root
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_ORDERSTATUS_DB=${MYSQL_ORDERSTATUS_DB}
       - MYSQL_ORDERSTATUS_PORT=3306
     depends_on:
       kafka:

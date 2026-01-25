@@ -27,7 +27,24 @@ The system consists of 4 decoupled microservices:
     - **Action**: Consumes ALL events (`OrderCreated`, `InventoryReserved`, `PaymentProcessed`, etc.) to update a unified "Read Model" database.
     - **Stack**: Express.js, MySQL2, KafkaJS.
 
----
+### System Flow
+
+```mermaid
+graph LR
+    User((User)) -->|POST /orders| OS[Order Service]
+    OS -->|OrderCreated| Kafka{Kafka}
+
+    Kafka -->|OrderCreated| IS[Inventory Service]
+    Kafka -->|OrderCreated| PS[Payment Service]
+
+    IS -->|InventoryReserved/Failed| Kafka
+    PS -->|PaymentProcessed/Failed| Kafka
+
+    Kafka -->|All Events| OSS[Order Status Service]
+    OSS -->|Updates| DB[(Read DB)]
+
+    User -->|GET /orders/:id| OSS
+```
 
 ## 🚀 Prerequisites
 
@@ -39,70 +56,68 @@ The system consists of 4 decoupled microservices:
 
 ## 🛠️ Setup & Installation
 
+We support a **Hybrid Workflow**. You can run services locally while keeping infrastructure (Kafka/MySQL) in Docker, OR run everything in Docker.
+
 ### 1. Start Infrastructure
 
-Start the supporting services (Kafka, Zookeeper, MySQL databases) using Docker.
+Regardless of your choice, you must start the core infrastructure first.
 
 ```bash
-docker-compose --env-file .env up -d
+# Starts Zookeeper, Kafka, and MySQL databases
+docker-compose up -d zookeeper kafka mysql-inventory mysql-orderstatus
 ```
 
-> **Note**: This uses the root `.env` file for docker configuration.
+### 2. Configure Environment
 
-### 2. Configure Microservices
-
-Each service has its own `.env` file for configuration. We have provided examples.
+We have streamlined configuration. Each service has a `.env` file that supports **Local Development** by default.
 
 ```bash
-# Order Service
+# Copy example files (if you haven't already, though the repo comes with defaults)
+# The default values in .env work out-of-the-box for Local Execution!
 cp order-service/.env.example order-service/.env
-
-# Inventory Service
 cp inventory-service/.env.example inventory-service/.env
-
-# Payment Service
 cp payment-service/.env.example payment-service/.env
-
-# Order Status Service
 cp order-status-service/.env.example order-status-service/.env
 ```
 
-### 3. Install Dependencies & Run
+### 3. Choose Your Run Mode
 
-You need to run each service in a **separate terminal**.
+#### Option A: Local Development (Recommended for coding)
 
-**Terminal 1: Order Service**
+Run each service in a separate terminal. They will connect to `localhost:9092` and the exposed MySQL ports.
+
+**Ports**:
+
+- Order Service: `http://localhost:3000`
+- Order Status Service: `http://localhost:3001`
+- MySQL Inventory: `localhost:3308` (Mapped to avoid conflict with local MySQL)
+- MySQL OrderStatus: `localhost:3309`
 
 ```bash
-cd order-service
-npm install
-npm run dev
-# Running on http://localhost:3000
+# Terminal 1
+cd order-service && npm install && npm run dev
+
+# Terminal 2
+cd inventory-service && npm install && npm run dev
+
+# Terminal 3
+cd payment-service && npm install && npm run dev
+
+# Terminal 4
+cd order-status-service && npm install && npm run dev
 ```
 
-**Terminal 2: Inventory Service**
+#### Option B: Full Docker Production (Recommended for testing)
+
+Run the entire stack inside containers. The `docker-compose.yml` automatically overrides the `.env` settings to use internal naming (e.g., `kafka:29092`).
+
+**Ports**:
+
+- Order Service: `http://localhost:3005`
+- Order Status Service: `http://localhost:3006`
 
 ```bash
-cd inventory-service
-npm install
-npm run dev
-```
-
-**Terminal 3: Payment Service**
-
-```bash
-cd payment-service
-npm install
-npm run dev
-```
-
-**Terminal 4: Order Status Service**
-
-```bash
-cd order-status-service
-npm install
-npm run dev
-# Running on http://localhost:3001
+docker-compose up -d --build
 ```
 
 ---
@@ -111,28 +126,31 @@ npm run dev
 
 ### Automated End-to-End Tests
 
-We have a Python test suite that verifies the entire flow (Happy Path & Failure Path).
+Our Python test suite works against EITHER mode (Local or Docker).
 
-1.  **Install Test Dependencies**:
+```bash
+cd tests
+python -m venv .venv
+./.venv/Scripts/Activate
+pip install -r requirements.txt
 
-    ```bash
-    cd tests
-    # Create virtual environment (optional but recommended)
-    python -m venv .venv
-    ./.venv/Scripts/Activate  # Windows
-    # source .venv/bin/activate # Mac/Linux
+# Run tests
+pytest -v
+```
 
-    pip install -r requirements.txt
-    ```
+> **Note**: If running against Docker, the tests automatically use ports 3005/3006. If running locally, you might need to adjust test URLs or just use Docker for E2E.
 
-2.  **Run Tests**:
-    ```bash
-    pytest -v
-    ```
+### Manual Verification (cURL)
 
-### Manual Testing (cURL)
+**Local Mode**:
 
-You can manually trigger an order:
+```bash
+curl -X POST http://localhost:3000/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "test-user", "items": [{"product_id": "prod-001", "quantity": 1}]}'
+```
+
+**Docker Mode**:
 
 ```bash
 curl -X POST http://localhost:3005/api/orders \
@@ -140,27 +158,49 @@ curl -X POST http://localhost:3005/api/orders \
   -d '{"user_id": "test-user", "items": [{"product_id": "prod-001", "quantity": 1}]}'
 ```
 
-Check status:
+---
 
-```bash
-# Replace with the order_id returned from the previous command
-curl http://localhost:3001/api/orders/<ORDER_ID>
-```
+---
+
+## 📚 API Reference
+
+### 1. Create Order
+
+**Endpoint**: `POST /api/orders`
+
+- **Body**:
+  ```json
+  {
+    "user_id": "user-123",
+    "items": [{ "product_id": "prod-001", "quantity": 1 }]
+  }
+  ```
+- **Response**: `202 Accepted` `{ "order_id": "..." }`
+
+### 2. Get Order Status
+
+**Endpoint**: `GET /api/orders/:order_id`
+
+- **Response**:
+  ```json
+  {
+    "order_id": "...uuid...",
+    "status": "COMPLETED",
+    "inventory_status": "RESERVED",
+    "payment_status": "PROCESSED"
+  }
+  ```
 
 ---
 
 ## ⚠️ Troubleshooting
 
-**1. "Insufficient Stock" Error in Tests**
-If the database was reset or volumes were lost, the product data might be missing.
-**Fix**: Reset usage data by wiping volumes and restarting.
+**1. "Address already in use" (Port Conflicts)**
 
-```bash
-docker-compose down -v
-docker-compose --env-file .env up -d
-```
+- We remapped Docker MySQL ports to **3308** and **3309** to avoid conflicting with your local MySQL on 3306.
+- Order Service maps to **3005** (Docker) vs **3000** (Local).
 
-(The `init.sql` script will automatically re-seed `prod-001` into the database).
+**2. Kafka Connection Errors**
 
-**2. "Access Denied" or Connection Errors**
-Ensure `docker-compose` is running. Check that each service's `.env` file has the correct `MYSQL_HOST`, `USER`, and `PASSWORD` (default: `root` / `super_secure_root_password_123`).
+- **Local**: Ensure `.env` says `KAFKA_BROKERS=localhost:9092`.
+- **Docker**: Ensure `docker-compose.yml` overrides this to `kafka:29092` (This is handled automatically).
