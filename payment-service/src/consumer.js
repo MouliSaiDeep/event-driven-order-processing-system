@@ -1,7 +1,7 @@
 const { Kafka } = require("kafkajs");
+const { pool } = require("./database");
 const { publishEvent } = require("./producer");
 const logger = require("./logger");
-
 const kafka = new Kafka({
   clientId: "payment-service",
   brokers: (process.env.KAFKA_BROKERS || "localhost:9092").split(","),
@@ -10,42 +10,81 @@ const kafka = new Kafka({
 const consumer = kafka.consumer({ groupId: "payment-group" });
 
 const processPayment = async (orderEvent) => {
-  const { order_id, user_id, idempotency_key, total_amount } = orderEvent;
+  const { order_id, user_id, idempotency_key, total_amount, correlation_id } = orderEvent;
+  const connection = await pool.getConnection();
 
-  logger.info(`Processing payment for order ${order_id}...`);
+  try {
+    await connection.beginTransaction();
 
-  // Simulate processing time
-  await new Promise((resolve) => setTimeout(resolve, 500));
+    // --- IDEMPOTENCY CHECK START ---
+    const [existingEvents] = await connection.execute(
+      "SELECT event_id FROM processed_events WHERE event_id = ? FOR UPDATE",
+      [idempotency_key],
+    );
 
-  // Deterministic mock for testing
-  let isSuccess;
-  if (user_id && user_id.startsWith("test-user")) {
-    isSuccess = true;
-  } else if (user_id === "fail-user") {
-    isSuccess = false;
-  } else {
-    isSuccess = Math.random() < 0.7;
-  }
+    if (existingEvents.length > 0) {
+      logger.info(
+        `Skipping duplicate event ${idempotency_key} for order ${order_id}`,
+        { correlation_id }
+      );
+      await connection.rollback();
+      return;
+    }
+    // --- IDEMPOTENCY CHECK END ---
 
-  if (isSuccess) {
-    logger.info(`Payment successful for order ${order_id}`);
-    await publishEvent("payment-events", {
-      event_type: "PaymentProcessed",
-      order_id,
-      status: "PROCESSED",
-      timestamp: new Date().toISOString(),
-      idempotency_key,
-    });
-  } else {
-    logger.warn(`Payment failed for order ${order_id}`);
-    await publishEvent("payment-events", {
-      event_type: "PaymentFailed",
-      order_id,
-      status: "FAILED",
-      reason: "Insufficient funds (Mock)",
-      timestamp: new Date().toISOString(),
-      idempotency_key,
-    });
+    logger.info(`Processing payment for order ${order_id}...`, { correlation_id });
+
+    // Simulate processing time
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Deterministic mock for testing
+    let isSuccess;
+    if (user_id && user_id.startsWith("test-user")) {
+      isSuccess = true;
+    } else if (user_id === "fail-user") {
+      isSuccess = false;
+    } else {
+      isSuccess = Math.random() < 0.7;
+    }
+
+    if (isSuccess) {
+      logger.info(`Payment successful for order ${order_id}`, { correlation_id });
+      await publishEvent("payment-events", {
+        event_type: "PaymentProcessed",
+        order_id,
+        status: "PROCESSED",
+        timestamp: new Date().toISOString(),
+        idempotency_key,
+        correlation_id,
+      });
+    } else {
+      logger.warn(`Payment failed for order ${order_id}`, { correlation_id });
+      await publishEvent("payment-events", {
+        event_type: "PaymentFailed",
+        order_id,
+        status: "FAILED",
+        reason: "Insufficient funds (Mock)",
+        timestamp: new Date().toISOString(),
+        idempotency_key,
+        correlation_id,
+      });
+    }
+
+    // Mark event as processed
+    await connection.execute(
+      "INSERT INTO processed_events (event_id) VALUES (?)",
+      [idempotency_key],
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    logger.error(
+      `Failed to process payment for order ${order_id}: ${error.message}`,
+      { correlation_id }
+    );
+  } finally {
+    connection.release();
   }
 };
 
@@ -70,4 +109,13 @@ const connectConsumer = async () => {
   }
 };
 
-module.exports = { connectConsumer };
+const disconnectConsumer = async () => {
+  try {
+    await consumer.disconnect();
+    logger.info("Disconnected from Kafka Consumer");
+  } catch (error) {
+    logger.error("Failed to disconnect Kafka Consumer:", error);
+  }
+};
+
+module.exports = { connectConsumer, disconnectConsumer, consumer };

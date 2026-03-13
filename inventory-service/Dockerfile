@@ -1,13 +1,17 @@
-FROM node:18-alpine
-
+# Stage 1: Build
+FROM node:18-alpine AS builder
 WORKDIR /app
-
 COPY package*.json ./
 RUN npm install
-
 COPY . .
 
-# Inventory service is a background worker (consumer), but might expose health/metrics later.
-# For now, no specific EXPOSE needed, but good practice.
+# Stage 2: Production
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY --from=builder /app/src ./src
+
+EXPOSE 8001
 
 CMD ["npm", "start"]

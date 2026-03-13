@@ -42,4 +42,13 @@ const publishEvent = async (topic, event) => {
   }
 };
 
-module.exports = { connectProducer, publishEvent };
+const disconnectProducer = async () => {
+  try {
+    await producer.disconnect();
+    logger.info("Disconnected from Kafka Producer");
+  } catch (error) {
+    logger.error("Failed to disconnect from Kafka Producer:", error);
+  }
+};
+
+module.exports = { connectProducer, publishEvent, disconnectProducer, producer };

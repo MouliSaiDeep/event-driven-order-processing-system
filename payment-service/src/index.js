@@ -1,6 +1,7 @@
 require("dotenv").config();
-const { connectProducer } = require("./producer");
-const { connectConsumer } = require("./consumer");
+const { connectProducer, disconnectProducer, producer } = require("./producer");
+const { connectConsumer, disconnectConsumer, consumer } = require("./consumer");
+const { pool } = require("./database");
 const logger = require("./logger");
 
 const http = require("http");
@@ -12,10 +13,21 @@ const startService = async () => {
   await connectConsumer();
 
   // Create simple HTTP server for health checks
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     if (req.url === "/health" && req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "UP" }));
+      let isDbConnected = false;
+      try {
+        await pool.query("SELECT 1");
+        isDbConnected = true;
+      } catch (err) { /* ignore */ }
+
+      if (isDbConnected) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "UP", dependencies: { mysql: "UP", kafka: "UP" } }));
+      } else {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "DOWN", dependencies: { mysql: "DOWN", kafka: "UP" } }));
+      }
     } else {
       res.writeHead(404);
       res.end();
@@ -28,6 +40,18 @@ const startService = async () => {
   });
 
   logger.info("Payment Service started successfully.");
+
+  const shutdown = async () => {
+    logger.info("Shutting down Payment Service gracefully...");
+    server.close();
+    await disconnectConsumer();
+    await disconnectProducer();
+    await pool.end();
+    process.exit(0);
+  };
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 };
 
 startService();

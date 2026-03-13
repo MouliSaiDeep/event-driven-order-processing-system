@@ -10,7 +10,7 @@ const kafka = new Kafka({
 const consumer = kafka.consumer({ groupId: "order-status-group" });
 
 const handleOrderCreated = async (event) => {
-  const { order_id, user_id, items, idempotency_key } = event;
+  const { order_id, user_id, items, idempotency_key, correlation_id } = event;
   try {
     await pool.execute(
       `INSERT INTO orders_read_model 
@@ -18,18 +18,18 @@ const handleOrderCreated = async (event) => {
        VALUES (?, ?, ?, 'PENDING', 'PENDING', 'PENDING', ?)`,
       [order_id, user_id, JSON.stringify(items), idempotency_key],
     );
-    logger.info(`Order ${order_id} created in read model`);
+    logger.info(`Order ${order_id} created in read model`, { correlation_id });
   } catch (error) {
     if (error.code === "ER_DUP_ENTRY") {
-      logger.warn(`Duplicate order creation skipped: ${order_id}`);
+      logger.warn(`Duplicate order creation skipped: ${order_id}`, { correlation_id });
     } else {
-      logger.error(`Failed to handle OrderCreated: ${error.message}`);
+      logger.error(`Failed to handle OrderCreated: ${error.message}`, { correlation_id });
     }
   }
 };
 
 const handleInventoryEvent = async (event) => {
-  const { order_id, status } = event;
+  const { order_id, status, correlation_id } = event;
   // status is 'RESERVED' or 'FAILED' from inventory service
 
   const inventoryStatus = status === "RESERVED" ? "RESERVED" : "FAILED";
@@ -50,15 +50,16 @@ const handleInventoryEvent = async (event) => {
     await pool.execute(query, params);
     logger.info(
       `Updated inventory status for ${order_id} to ${inventoryStatus}`,
+      { correlation_id }
     );
-    await checkCompletion(order_id);
+    await checkCompletion(order_id, correlation_id);
   } catch (error) {
-    logger.error(`Failed to handle InventoryEvent: ${error.message}`);
+    logger.error(`Failed to handle InventoryEvent: ${error.message}`, { correlation_id });
   }
 };
 
 const handlePaymentEvent = async (event) => {
-  const { order_id, status } = event;
+  const { order_id, status, correlation_id } = event;
   // status is 'PROCESSED' or 'FAILED' from payment service
 
   const paymentStatus = status === "PROCESSED" ? "PAID" : "FAILED";
@@ -77,14 +78,14 @@ const handlePaymentEvent = async (event) => {
     params.push(order_id);
 
     await pool.execute(query, params);
-    logger.info(`Updated payment status for ${order_id} to ${paymentStatus}`);
-    await checkCompletion(order_id);
+    logger.info(`Updated payment status for ${order_id} to ${paymentStatus}`, { correlation_id });
+    await checkCompletion(order_id, correlation_id);
   } catch (error) {
-    logger.error(`Failed to handle PaymentEvent: ${error.message}`);
+    logger.error(`Failed to handle PaymentEvent: ${error.message}`, { correlation_id });
   }
 };
 
-const checkCompletion = async (order_id) => {
+const checkCompletion = async (order_id, correlation_id) => {
   try {
     const [rows] = await pool.execute(
       "SELECT inventory_status, payment_status, status FROM orders_read_model WHERE order_id = ?",
@@ -104,11 +105,12 @@ const checkCompletion = async (order_id) => {
         "UPDATE orders_read_model SET status = ? WHERE order_id = ?",
         ["COMPLETED", order_id],
       );
-      logger.info(`Order ${order_id} marked as COMPLETED`);
+      logger.info(`Order ${order_id} marked as COMPLETED`, { correlation_id });
     }
   } catch (error) {
     logger.error(
       `Failed to check completion for ${order_id}: ${error.message}`,
+      { correlation_id }
     );
   }
 };
@@ -126,7 +128,7 @@ const connectConsumer = async () => {
     await consumer.run({
       eachMessage: async ({ topic, partition, message }) => {
         const event = JSON.parse(message.value.toString());
-        logger.info(`Received ${topic} event`, { order_id: event.order_id });
+        logger.info(`Received ${topic} event`, { order_id: event.order_id, correlation_id: event.correlation_id });
 
         switch (topic) {
           case "order-created":
@@ -148,4 +150,13 @@ const connectConsumer = async () => {
   }
 };
 
-module.exports = { connectConsumer };
+const disconnectConsumer = async () => {
+  try {
+    await consumer.disconnect();
+    logger.info("Disconnected from Kafka Consumer");
+  } catch (error) {
+    logger.error("Failed to disconnect Kafka Consumer:", error);
+  }
+};
+
+module.exports = { connectConsumer, disconnectConsumer, consumer };

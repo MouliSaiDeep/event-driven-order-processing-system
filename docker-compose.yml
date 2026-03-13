@@ -58,6 +58,24 @@ services:
     networks:
       - order-network
 
+  mysql-payment:
+    image: 'mysql:8.0'
+    ports:
+      - '${MYSQL_PAYMENT_PORT}:3306'
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_PAYMENT_DB}
+      - MYSQL_ROOT_HOST=%
+    volumes:
+      - ./mysql/payment:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - order-network
+
   mysql-orderstatus:
     image: 'mysql:8.0'
     ports:
@@ -87,6 +105,11 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - order-network
 
@@ -103,6 +126,11 @@ services:
         condition: service_healthy
       mysql-inventory:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - order-network
 
@@ -112,9 +140,18 @@ services:
       - ./payment-service/.env
     environment:
       - KAFKA_BROKERS=kafka:29092
+      - MYSQL_PAYMENT_HOST=mysql-payment
+      - MYSQL_PAYMENT_PORT=3306
     depends_on:
       kafka:
         condition: service_healthy
+      mysql-payment:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - order-network
 
@@ -133,6 +170,11 @@ services:
         condition: service_healthy
       mysql-orderstatus:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - order-network
 

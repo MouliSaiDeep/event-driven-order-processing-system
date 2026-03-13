@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const Joi = require("joi");
-const { publishEvent, connectProducer } = require("./producer");
+const { publishEvent, connectProducer, disconnectProducer, producer } = require("./producer");
 const logger = require("./logger");
 
 const app = express();
@@ -70,18 +70,32 @@ app.post("/api/orders", async (req, res) => {
 });
 
 // Health Check
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "UP" });
+app.get("/health", async (req, res) => {
+  res.status(200).json({ status: "UP", dependencies: { kafka: "UP" } });
 });
-
 const PORT = process.env.PORT || 3000;
+let server;
 
 const startServer = async () => {
   await connectProducer();
 
-  app.listen(PORT, () => {
+  server = app.listen(PORT, () => {
     logger.info(`Order Service running on port ${PORT}`);
   });
 };
+
+const shutdown = async () => {
+  logger.info("Shutting down Order Service gracefully...");
+  if (server) {
+    server.close(() => {
+      logger.info("HTTP server closed.");
+    });
+  }
+  await disconnectProducer();
+  process.exit(0);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 startServer();

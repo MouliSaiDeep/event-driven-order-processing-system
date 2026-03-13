@@ -11,7 +11,7 @@ const kafka = new Kafka({
 const consumer = kafka.consumer({ groupId: "inventory-group" });
 
 const processOrder = async (orderEvent) => {
-  const { order_id, items, idempotency_key } = orderEvent;
+  const { order_id, items, idempotency_key, correlation_id } = orderEvent;
   const connection = await pool.getConnection();
 
   try {
@@ -26,6 +26,7 @@ const processOrder = async (orderEvent) => {
     if (existingEvents.length > 0) {
       logger.info(
         `Skipping duplicate event ${idempotency_key} for order ${order_id}`,
+        { correlation_id }
       );
       await connection.rollback();
       return;
@@ -59,7 +60,7 @@ const processOrder = async (orderEvent) => {
     );
 
     await connection.commit();
-    logger.info(`Stock reserved for order ${order_id}`);
+    logger.info(`Stock reserved for order ${order_id}`, { correlation_id });
 
     // Publish Success Event
     await publishEvent("inventory-events", {
@@ -68,11 +69,13 @@ const processOrder = async (orderEvent) => {
       status: "RESERVED",
       timestamp: new Date().toISOString(),
       idempotency_key,
+      correlation_id,
     });
   } catch (error) {
     await connection.rollback();
     logger.error(
       `Failed to reserve stock for order ${order_id}: ${error.message}`,
+      { correlation_id }
     );
 
     // Publish Failure Event
@@ -83,6 +86,7 @@ const processOrder = async (orderEvent) => {
       reason: error.message,
       timestamp: new Date().toISOString(),
       idempotency_key,
+      correlation_id,
     });
   } finally {
     connection.release();
@@ -99,6 +103,7 @@ const connectConsumer = async () => {
         const event = JSON.parse(message.value.toString());
         logger.info(`Received order-created event`, {
           order_id: event.order_id,
+          correlation_id: event.correlation_id,
         });
         await processOrder(event);
       },
@@ -110,4 +115,13 @@ const connectConsumer = async () => {
   }
 };
 
-module.exports = { connectConsumer };
+const disconnectConsumer = async () => {
+  try {
+    await consumer.disconnect();
+    logger.info("Disconnected from Kafka Consumer");
+  } catch (error) {
+    logger.error("Failed to disconnect Kafka Consumer:", error);
+  }
+};
+
+module.exports = { connectConsumer, disconnectConsumer, consumer };

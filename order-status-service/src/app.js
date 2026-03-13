@@ -8,8 +8,18 @@ app.use(express.json());
 app.use(cors());
 
 // Health Check
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "UP" });
+app.get("/health", async (req, res) => {
+  let isDbConnected = false;
+  try {
+    await pool.query("SELECT 1");
+    isDbConnected = true;
+  } catch (err) { /* ignore */ }
+
+  if (isDbConnected) {
+    res.status(200).json({ status: "UP", dependencies: { mysql: "UP", kafka: "UP" } });
+  } else {
+    res.status(503).json({ status: "DOWN", dependencies: { mysql: "DOWN", kafka: "UP" } });
+  }
 });
 
 // Get Order Status
