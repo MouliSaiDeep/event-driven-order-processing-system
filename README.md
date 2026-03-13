@@ -113,8 +113,8 @@ Run the entire stack inside containers. The `docker-compose.yml` automatically o
 
 **Ports**:
 
-- Order Service: `http://localhost:3005`
-- Order Status Service: `http://localhost:3006`
+- Order Service: `http://localhost:18005`
+- Order Status Service: `http://localhost:18006`
 
 ```bash
 docker-compose up -d --build
@@ -139,6 +139,11 @@ pytest -v
 ```
 
 > **Note**: If running against Docker, the tests automatically use ports 3005/3006. If running locally, you might need to adjust test URLs or just use Docker for E2E.
+>
+> To override test targets explicitly:
+>
+> - `ORDER_SERVICE_URL` (default: `http://localhost:18005`)
+> - `ORDER_STATUS_SERVICE_URL` (default: `http://localhost:18006`)
 
 ### Manual Verification (cURL)
 
@@ -153,7 +158,7 @@ curl -X POST http://localhost:3000/api/orders \
 **Docker Mode**:
 
 ```bash
-curl -X POST http://localhost:3005/api/orders \
+curl -X POST http://localhost:18005/api/orders \
   -H "Content-Type: application/json" \
   -d '{"user_id": "test-user", "items": [{"product_id": "prod-001", "quantity": 1}]}'
 ```
@@ -198,9 +203,15 @@ curl -X POST http://localhost:3005/api/orders \
 **1. "Address already in use" (Port Conflicts)**
 
 - We remapped Docker MySQL ports to **3308** and **3309** to avoid conflicting with your local MySQL on 3306.
-- Order Service maps to **3005** (Docker) vs **3000** (Local).
+- Order Service maps to **18005** (Docker) vs **3000** (Local).
 
 **2. Kafka Connection Errors**
 
 - **Local**: Ensure `.env` says `KAFKA_BROKERS=localhost:9092`.
 - **Docker**: Ensure `docker-compose.yml` overrides this to `kafka:29092` (This is handled automatically).
+
+---
+
+## 📝 Questionnaire
+
+Questionnaire responses for architecture, idempotency, resilience, and design decisions are documented in **QUESTIONNAIRE.md**.

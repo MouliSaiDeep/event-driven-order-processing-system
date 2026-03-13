@@ -2,9 +2,10 @@ import pytest
 import requests
 import time
 import uuid
+import os
 
-ORDER_SERVICE_URL = "http://localhost:3005"
-ORDER_STATUS_SERVICE_URL = "http://localhost:3006"
+ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://localhost:18005")
+ORDER_STATUS_SERVICE_URL = os.getenv("ORDER_STATUS_SERVICE_URL", "http://localhost:18006")
 
 def poll_for_status(order_id, expected_status=None, expected_inventory=None, expected_payment=None, timeout=15):
     start_time = time.time()
@@ -109,8 +110,10 @@ def test_4_insufficient_stock():
     assert response.status_code == 202
     order_id = response.json()["order_id"]
     
-    # Should fail due to inventory
-    poll_for_status(order_id, "FAILED", "FAILED", "PENDING")
+    # Inventory failure is the only deterministic assertion in this scenario.
+    # Payment is processed independently and may already be PAID by the time
+    # status becomes FAILED.
+    poll_for_status(order_id, "FAILED", "FAILED")
 
 def test_5_payment_failure():
     """Scenario 5: Payment failure triggered by specific user"""
