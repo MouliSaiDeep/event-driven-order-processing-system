@@ -6,7 +6,7 @@ A distributed e-commerce system built with **Node.js** microservices, **Kafka** 
 
 The system consists of 4 decoupled microservices:
 
-1.  **Order Service** (Port `3000`)
+1.  **Order Service** (Local port `3000`, Docker endpoint `http://localhost:3005`)
     - **Role**: Accepts HTTP requests for new orders.
     - **Action**: Validates input and publishes `OrderCreated` events to Kafka.
     - **Stack**: Express.js, KafkaJS.
@@ -22,7 +22,7 @@ The system consists of 4 decoupled microservices:
     - **Action**: Consumes `OrderCreated`. Mocks payment logic (70% success rate). Publishes `PaymentProcessed`.
     - **Stack**: Node.js, KafkaJS.
 
-4.  **Order Status Service** (Port `3001`)
+4.  **Order Status Service** (Local port `3001`, Docker endpoint `http://localhost:3006`)
     - **Role**: Tracks the lifecycle of an order.
     - **Action**: Consumes ALL events (`OrderCreated`, `InventoryReserved`, `PaymentProcessed`, etc.) to update a unified "Read Model" database.
     - **Stack**: Express.js, MySQL2, KafkaJS.
@@ -31,7 +31,7 @@ The system consists of 4 decoupled microservices:
 
 ```mermaid
 graph LR
-    User((User)) -->|POST /orders| OS[Order Service]
+  User((User)) -->|POST /api/orders| OS[Order Service]
     OS -->|OrderCreated| Kafka{Kafka}
 
     Kafka -->|OrderCreated| IS[Inventory Service]
@@ -43,7 +43,7 @@ graph LR
     Kafka -->|All Events| OSS[Order Status Service]
     OSS -->|Updates| DB[(Read DB)]
 
-    User -->|GET /orders/:id| OSS
+    User -->|GET /api/orders/:order_id| OSS
 ```
 
 ## 🚀 Prerequisites
@@ -110,11 +110,15 @@ cd order-status-service && npm install && npm run dev
 #### Option B: Full Docker Production (Recommended for testing)
 
 Run the entire stack inside containers. The `docker-compose.yml` automatically overrides the `.env` settings to use internal naming (e.g., `kafka:29092`).
+The current root `.env` maps Docker HTTP endpoints to:
+
+- `ORDER_SERVICE_PORT=3005`
+- `ORDER_STATUS_PORT=3006`
 
 **Ports**:
 
-- Order Service: `http://localhost:18005`
-- Order Status Service: `http://localhost:18006`
+- Order Service: `http://localhost:3005`
+- Order Status Service: `http://localhost:3006`
 
 ```bash
 docker-compose up -d --build
@@ -142,8 +146,8 @@ pytest -v
 >
 > To override test targets explicitly:
 >
-> - `ORDER_SERVICE_URL` (default: `http://localhost:18005`)
-> - `ORDER_STATUS_SERVICE_URL` (default: `http://localhost:18006`)
+> - `ORDER_SERVICE_URL` (default: `http://localhost:3005`)
+> - `ORDER_STATUS_SERVICE_URL` (default: `http://localhost:3006`)
 
 ### Manual Verification (cURL)
 
@@ -158,9 +162,11 @@ curl -X POST http://localhost:3000/api/orders \
 **Docker Mode**:
 
 ```bash
-curl -X POST http://localhost:18005/api/orders \
+curl -X POST http://localhost:3005/api/orders \
   -H "Content-Type: application/json" \
   -d '{"user_id": "test-user", "items": [{"product_id": "prod-001", "quantity": 1}]}'
+
+curl http://localhost:3006/api/orders/<order_id>
 ```
 
 ---
@@ -169,32 +175,90 @@ curl -X POST http://localhost:18005/api/orders \
 
 ## 📚 API Reference
 
-### 1. Create Order
+Total implemented HTTP endpoints: `6`
 
-**Endpoint**: `POST /api/orders`
+### 1. Create Order (Order Service)
 
-- **Body**:
-  ```json
-  {
-    "user_id": "user-123",
-    "items": [{ "product_id": "prod-001", "quantity": 1 }]
-  }
-  ```
-- **Response**: `202 Accepted` `{ "order_id": "..." }`
+- Method and path: `POST /api/orders`
+- Local URL: `http://localhost:3000/api/orders`
+- Docker URL: `http://localhost:3005/api/orders`
+- Request body: Required JSON
 
-### 2. Get Order Status
+```json
+{
+  "user_id": "user-123",
+  "items": [{ "product_id": "prod-001", "quantity": 1 }],
+  "idempotency_key": "optional-uuid"
+}
+```
 
-**Endpoint**: `GET /api/orders/:order_id`
+- curl:
 
-- **Response**:
-  ```json
-  {
-    "order_id": "...uuid...",
-    "status": "COMPLETED",
-    "inventory_status": "RESERVED",
-    "payment_status": "PROCESSED"
-  }
-  ```
+```bash
+curl -X POST http://localhost:3005/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"test-user","items":[{"product_id":"prod-001","quantity":1}]}'
+```
+
+### 2. Order Service Health
+
+- Method and path: `GET /health`
+- Local URL: `http://localhost:3000/health`
+- Docker URL: `http://localhost:3005/health`
+- Request body: None
+- curl:
+
+```bash
+curl http://localhost:3005/health
+```
+
+### 3. Get Order Status (Order Status Service)
+
+- Method and path: `GET /api/orders/:orderId`
+- Local URL: `http://localhost:3001/api/orders/<order_id>`
+- Docker URL: `http://localhost:3006/api/orders/<order_id>`
+- Request body: None
+- curl:
+
+```bash
+curl http://localhost:3006/api/orders/<order_id>
+```
+
+### 4. Order Status Service Health
+
+- Method and path: `GET /health`
+- Local URL: `http://localhost:3001/health`
+- Docker URL: `http://localhost:3006/health`
+- Request body: None
+- curl:
+
+```bash
+curl http://localhost:3006/health
+```
+
+### 5. Inventory Service Health
+
+- Method and path: `GET /health`
+- Local URL: `http://localhost:8001/health`
+- Docker URL: Internal only by default in full Docker mode (no host port mapping)
+- Request body: None
+- curl (local/hybrid mode):
+
+```bash
+curl http://localhost:8001/health
+```
+
+### 6. Payment Service Health
+
+- Method and path: `GET /health`
+- Local URL: `http://localhost:8002/health`
+- Docker URL: Internal only by default in full Docker mode (no host port mapping)
+- Request body: None
+- curl (local/hybrid mode):
+
+```bash
+curl http://localhost:8002/health
+```
 
 ---
 
@@ -203,7 +267,9 @@ curl -X POST http://localhost:18005/api/orders \
 **1. "Address already in use" (Port Conflicts)**
 
 - We remapped Docker MySQL ports to **3308** and **3309** to avoid conflicting with your local MySQL on 3306.
-- Order Service maps to **18005** (Docker) vs **3000** (Local).
+- Order Service maps to **3005** (Docker) vs **3000** (Local).
+
+On some Windows setups, ports `3005` and `3006` may be reserved by the OS. In that case, temporarily override `ORDER_SERVICE_PORT` and `ORDER_STATUS_PORT` in the root `.env` before running Docker locally.
 
 **2. Kafka Connection Errors**
 

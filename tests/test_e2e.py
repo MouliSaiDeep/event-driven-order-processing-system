@@ -4,8 +4,8 @@ import time
 import uuid
 import os
 
-ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://localhost:18005")
-ORDER_STATUS_SERVICE_URL = os.getenv("ORDER_STATUS_SERVICE_URL", "http://localhost:18006")
+ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://localhost:3005")
+ORDER_STATUS_SERVICE_URL = os.getenv("ORDER_STATUS_SERVICE_URL", "http://localhost:3006")
 
 def poll_for_status(order_id, expected_status=None, expected_inventory=None, expected_payment=None, timeout=15):
     start_time = time.time()

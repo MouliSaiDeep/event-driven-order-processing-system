@@ -9,6 +9,39 @@ const kafka = new Kafka({
 
 const consumer = kafka.consumer({ groupId: "payment-group" });
 
+const MAX_STARTUP_RETRIES = Number(process.env.KAFKA_STARTUP_RETRIES || 8);
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableStartupError = (error) => {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    Boolean(error?.retriable) ||
+    message.includes("does not host this topic-partition") ||
+    message.includes("unknown topic or partition") ||
+    message.includes("leader not available")
+  );
+};
+
+const ensureOrderTopicExists = async () => {
+  const admin = kafka.admin();
+  try {
+    await admin.connect();
+    await admin.createTopics({
+      waitForLeaders: true,
+      topics: [
+        {
+          topic: "order-created",
+          numPartitions: 1,
+          replicationFactor: 1,
+        },
+      ],
+    });
+  } finally {
+    await admin.disconnect();
+  }
+};
+
 const processPayment = async (orderEvent) => {
   const { order_id, user_id, idempotency_key, total_amount, correlation_id } = orderEvent;
   const connection = await pool.getConnection();
@@ -89,23 +122,44 @@ const processPayment = async (orderEvent) => {
 };
 
 const connectConsumer = async () => {
-  try {
-    await consumer.connect();
-    await consumer.subscribe({ topic: "order-created", fromBeginning: true });
+  for (let attempt = 1; attempt <= MAX_STARTUP_RETRIES; attempt += 1) {
+    try {
+      await ensureOrderTopicExists();
+      await consumer.connect();
+      await consumer.subscribe({ topic: "order-created", fromBeginning: true });
 
-    await consumer.run({
-      eachMessage: async ({ topic, partition, message }) => {
-        const event = JSON.parse(message.value.toString());
-        logger.info(`Received order-created event`, {
-          order_id: event.order_id,
+      await consumer.run({
+        eachMessage: async ({ message }) => {
+          const event = JSON.parse(message.value.toString());
+          logger.info(`Received order-created event`, {
+            order_id: event.order_id,
+          });
+          await processPayment(event);
+        },
+      });
+      logger.info("Kafka Consumer connected and listening");
+      return;
+    } catch (error) {
+      const retryable = isRetryableStartupError(error);
+      logger.error(
+        `Failed to connect Kafka Consumer (attempt ${attempt}/${MAX_STARTUP_RETRIES})`,
+        error,
+      );
+
+      try {
+        await consumer.disconnect();
+      } catch (disconnectError) {
+        logger.warn("Consumer disconnect after failed startup attempt was not clean", {
+          reason: disconnectError.message,
         });
-        await processPayment(event);
-      },
-    });
-    logger.info("Kafka Consumer connected and listening");
-  } catch (error) {
-    logger.error("Failed to connect Kafka Consumer:", error);
-    process.exit(1);
+      }
+
+      if (!retryable || attempt === MAX_STARTUP_RETRIES) {
+        process.exit(1);
+      }
+
+      await wait(1000 * attempt);
+    }
   }
 };
 
